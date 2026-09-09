@@ -94,8 +94,8 @@ function getModuleAbortSignal(): AbortSignal {
 const SubagentParams = Type.Object({
   agent: Type.String({
     description:
-      "Which agent to spawn (e.g. 'worker', 'scout', 'researcher'). This loads the agent's " +
-      "fixed profile — its model, tool loadout, and system prompt. Must be one of the available agents.",
+      "Which agent to spawn. Must be one of the names returned by `subagents_list`. " +
+      "This loads the agent's fixed profile — its model, tool loadout, and system prompt.",
   }),
   task: Type.String({ description: "Task/prompt for the sub-agent" }),
   name: Type.Optional(
@@ -109,7 +109,7 @@ const SubagentParams = Type.Object({
   cwd: Type.Optional(
     Type.String({
       description:
-        "Working directory for the sub-agent. The agent starts in this folder and picks up its local .pi/ config, CLAUDE.md, skills, and extensions. Use for role-specific subfolders.",
+        "Working directory for the sub-agent. The agent starts in this folder and picks up its local .pi/ config, AGENTS.md, skills, and extensions. Use for role-specific subfolders.",
     }),
   ),
 });
@@ -1686,16 +1686,18 @@ export default function subagentsExtension(pi: ExtensionAPI) {
       label: "Subagent",
       description:
         "Spawn a sub-agent in a dedicated terminal multiplexer pane. " +
+        "Call `subagents_list` first to discover available agents — `agent` must be one of those names. " +
         "This is a fire-and-forget async tool: the call returns immediately with only an acknowledgement. " +
         "When the sub-agent finishes, the harness AUTOMATICALLY delivers its result as a steer message that wakes you up and starts a new turn — you do not need to do anything to receive it. " +
-        "DO NOT write polling loops, sleep/wait commands, tail/watch scripts, or repeatedly read session/log files to detect completion. DO NOT call subagents_list or any other tool to 'check' status. All of that is wasted work — the harness handles delivery for you. " +
+        "DO NOT write polling loops, sleep/wait commands, tail/watch scripts, or repeatedly read session/log files to detect completion. DO NOT re-run subagents_list to 'check' whether a sub-agent has finished. All of that is wasted work — the harness handles delivery for you. " +
         "DO NOT fabricate, assume, or summarize results after calling this tool. " +
         "After spawning, either end your turn immediately, or work on other independent tasks (including spawning more subagents in parallel). The harness will wake you with the result when it is ready.",
       promptSnippet:
         "Spawn a sub-agent in a dedicated terminal multiplexer pane. " +
+        "Call `subagents_list` first to discover available agents — `agent` must be one of those names. " +
         "This is a fire-and-forget async tool: the call returns immediately with only an acknowledgement. " +
         "When the sub-agent finishes, the harness AUTOMATICALLY delivers its result as a steer message that wakes you up and starts a new turn — you do not need to do anything to receive it. " +
-        "DO NOT write polling loops, sleep/wait commands, tail/watch scripts, or repeatedly read session/log files to detect completion. DO NOT call subagents_list or any other tool to 'check' status. All of that is wasted work — the harness handles delivery for you. " +
+        "DO NOT write polling loops, sleep/wait commands, tail/watch scripts, or repeatedly read session/log files to detect completion. DO NOT re-run subagents_list to 'check' whether a sub-agent has finished. All of that is wasted work — the harness handles delivery for you. " +
         "DO NOT fabricate, assume, or summarize results after calling this tool. " +
         "After spawning, either end your turn immediately, or work on other independent tasks (including spawning more subagents in parallel). The harness will wake you with the result when it is ready.",
       parameters: SubagentParams,
@@ -1955,12 +1957,12 @@ export default function subagentsExtension(pi: ExtensionAPI) {
       label: "List Subagents",
       description:
         "List all available subagent definitions. " +
-        "Scans project-local .pi/agents/ and global ~/.pi/agent/agents/. " +
-        "Project-local agents override global ones with the same name.",
+        "Scans project-local .pi/agents/, global ~/.pi/agent/agents/, and package-bundled agents/ directories. " +
+        "With duplicate names, project-local overrides global, which overrides package-bundled.",
       promptSnippet:
         "List all available subagent definitions. " +
-        "Scans project-local .pi/agents/ and global ~/.pi/agent/agents/. " +
-        "Project-local agents override global ones with the same name.",
+        "Scans project-local .pi/agents/, global ~/.pi/agent/agents/, and package-bundled agents/ directories. " +
+        "With duplicate names, project-local overrides global, which overrides package-bundled.",
       parameters: Type.Object({}),
 
       async execute() {
