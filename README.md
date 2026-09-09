@@ -39,7 +39,7 @@ There is also a `/subagent <agent> <task>` command for spawning directly.
 ### Spawning
 
 ```typescript
-subagent({ agent: "scout", task: "Analyze the auth module" });
+subagent({ agent: "my-agent", task: "Analyze the auth module" });
 subagent({ agent: "worker", name: "dark-mode", task: "Implement the dark mode toggle" });
 ```
 
@@ -56,7 +56,7 @@ subagent({ agent: "worker", name: "dark-mode", task: "Implement the dark mode to
 `subagent_message` is addressed **by name only**. Names are unique per session and persist after a sub-agent finishes, so the same name works either way:
 
 ```typescript
-subagent_message({ name: "scout", message: "Also check the auth middleware" });
+subagent_message({ name: "my-agent", message: "Also check the auth middleware" });
 ```
 
 - **Running** — the message is typed into the live pane (newlines flattened) and picked up at the next turn boundary. The call returns immediately; the eventual completion still arrives as a steer message.
@@ -72,19 +72,9 @@ A sub-agent can ask its orchestrator a single freeform question when requirement
 
 If the reply arrives while the sub-agent is still mid-turn, it is absorbed into the current turn — either way the question is marked answered and the session exits normally when the work is done. If the parent never replies, the pane stays open until a human closes it. Only available inside sub-agent sessions.
 
-## Bundled agents
+## Agents
 
-| Agent | Model | Tools | Role |
-| ----- | ----- | ----- | ---- |
-| **scout** | `openrouter/z-ai/glm-5.3` | `read`, `grep`, `find`, `ls` | Fast read-only codebase recon |
-| **researcher** | `openrouter/z-ai/glm-5.3` | `web_search`, `web_fetch`, `safe_bash` | Web research, synthesized into a sourced brief |
-| **worker** | `openrouter/z-ai/glm-5.3` | `read`, `write`, `edit`, `bash`, `web_search`, `web_fetch` + spawning | General implementer; may spawn `scout` and `researcher` |
-
-All three are autonomous (`auto-exit: true`) and carry their identity in the system prompt (`system-prompt: append`).
-
-## Custom agents
-
-Place a `.md` file in `.pi/agents/` (project) or `~/.pi/agent/agents/` (global). Discovery priority: **project > global > package-bundled** — a project-local file overrides a bundled agent with the same name.
+No agents ship with the extension. Place a `.md` file in `.pi/agents/` (project) or `~/.pi/agent/agents/` (global). Discovery priority: **project > global > package-bundled** — same-name files in higher-priority directories override lower ones.
 
 ```markdown
 ---

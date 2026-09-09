@@ -1172,38 +1172,51 @@ describe("subagent discovery", () => {
     );
   });
 
-  it("bundled scout/researcher/worker all resolve as non-interactive (auto-exit)", () => {
-    for (const name of ["scout", "researcher", "worker"]) {
-      const defs = testApi.loadAgentDefaults(name);
-      assert.ok(defs, `expected bundled agent ${name} to be discoverable`);
-      assert.equal(
-        testApi.resolveEffectiveInteractive({ name, task: "" }, defs),
-        false,
-        `${name} should resolve as non-interactive (autonomous, auto-exit)`,
+  it("auto-exit agents resolve as non-interactive", async () => {
+    await withIsolatedAgentEnv(async ({ projectAgentsDir }) => {
+      for (const name of ["alpha-scout", "beta-researcher", "gamma-worker"]) {
+        writeAgentFile(projectAgentsDir, name, [`name: ${name}`, "auto-exit: true"].join("\n"));
+        const defs = testApi.loadAgentDefaults(name);
+        assert.ok(defs, `expected agent ${name} to be discoverable`);
+        assert.equal(
+          testApi.resolveEffectiveInteractive({ name, task: "" }, defs),
+          false,
+          `${name} should resolve as non-interactive (autonomous, auto-exit)`,
+        );
+      }
+    });
+  });
+
+  it("an agent declaring subagent_agents is granted the spawning toolset restricted to its list", async () => {
+    await withIsolatedAgentEnv(async ({ projectAgentsDir }) => {
+      writeAgentFile(
+        projectAgentsDir,
+        "orchestrator",
+        ["name: orchestrator", "tools: read, bash", "subagent_agents: alpha, beta"].join("\n"),
       );
-    }
+      const worker = testApi.loadAgentDefaults("orchestrator");
+      assert.ok(worker, "expected orchestrator to be discoverable");
+      assert.deepEqual(worker.subagentAgents, ["alpha", "beta"]);
+
+      const allowlist = testApi.buildSubagentToolAllowlist(worker.tools, { grantSpawning: true });
+      assert.ok(allowlist, "expected an allowlist");
+      const tools = new Set(allowlist!.split(","));
+      for (const t of ["subagent", "subagent_message", "subagents_list"]) {
+        assert.ok(tools.has(t), `expected spawning tool ${t} in allowlist`);
+      }
+      assert.ok(tools.has("bash"), "expected orchestrator to keep bash");
+    });
   });
 
-  it("worker is granted the spawning toolset restricted to scout and researcher", () => {
-    const worker = testApi.loadAgentDefaults("worker");
-    assert.ok(worker, "expected bundled worker to be discoverable");
-    assert.deepEqual(worker.subagentAgents, ["scout", "researcher"]);
-
-    const allowlist = testApi.buildSubagentToolAllowlist(worker.tools, { grantSpawning: true });
-    assert.ok(allowlist, "expected an allowlist");
-    const tools = new Set(allowlist!.split(","));
-    for (const t of ["subagent", "subagent_message", "subagents_list"]) {
-      assert.ok(tools.has(t), `expected spawning tool ${t} in worker allowlist`);
-    }
-    assert.ok(tools.has("bash"), "expected worker to keep bash");
-  });
-
-  it("scout and researcher are not granted spawning tools", () => {
-    for (const name of ["scout", "researcher"]) {
-      const defs = testApi.loadAgentDefaults(name);
-      assert.ok(defs, `expected bundled agent ${name} to be discoverable`);
-      assert.equal(defs.subagentAgents, undefined, `${name} should not declare subagent_agents`);
-    }
+  it("agents without subagent_agents are not granted spawning tools", async () => {
+    await withIsolatedAgentEnv(async ({ projectAgentsDir }) => {
+      for (const name of ["alpha-scout", "beta-researcher"]) {
+        writeAgentFile(projectAgentsDir, name, [`name: ${name}`, "tools: read, grep"].join("\n"));
+        const defs = testApi.loadAgentDefaults(name);
+        assert.ok(defs, `expected agent ${name} to be discoverable`);
+        assert.equal(defs.subagentAgents, undefined, `${name} should not declare subagent_agents`);
+      }
+    });
   });
 
   it("getToolExtensionPath maps custom tools and skips built-ins", () => {
@@ -1788,7 +1801,7 @@ describe("tmux.ts interpretExitSidecar", () => {
   });
 });
 describe("commands", () => {
-  it("/subagent emits a spawn tool call for a known agent", () => {
+  it("/subagent emits a spawn tool call for a known agent", async () => {
     const { api, registeredCommands, sentUserMessages } = createMockExtensionApi();
 
     (subagentsModule as any).default(api);
@@ -1796,12 +1809,15 @@ describe("commands", () => {
     const subagent = registeredCommands.find((command) => command.name === "subagent");
     assert.ok(subagent, "expected /subagent to be registered");
 
-    subagent.handler("scout map the auth code", {
-      ui: { notify() {} },
+    await withIsolatedAgentEnv(async ({ projectAgentsDir }) => {
+      writeAgentFile(projectAgentsDir, "my-agent", "name: my-agent");
+      subagent.handler("my-agent map the auth code", {
+        ui: { notify() {} },
+      });
     });
 
     assert.equal(sentUserMessages.length, 1);
-    assert.match(sentUserMessages[0], /agent: "scout"/);
+    assert.match(sentUserMessages[0], /agent: "my-agent"/);
     assert.match(sentUserMessages[0], /map the auth code/);
   });
 
