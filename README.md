@@ -157,13 +157,26 @@ Set a per-agent default with `cwd:` in frontmatter.
 
 The widget tracks each sub-agent from a runtime activity snapshot written by the child: `starting`, `active` (turn/provider/tool work), `waiting` (open for input or another stage), `stalled` (no valid snapshot for too long), or `running` (fallback). Sub-agent sessions also show their own tools widget — toggle it with `Ctrl+Alt+O`. Completion messages expand with `Ctrl+O`.
 
-Status display is configured via `config.json` in the extension directory (copy `config.json.example`; it's gitignored):
+Extension behavior is configured via an optional JSON file at pi's standard extension config location, `~/.pi/agent/extensions/subagents.json` (resolved with `getAgentDir()`, so `PI_CODING_AGENT_DIR` and rebranded distributions are respected). Create it only to override defaults — `subagents.json.example` in the repo is a template; every section is optional and missing sections use built-in defaults:
 
 ```json
 {
-  "status": { "enabled": true }
+  "status": { "enabled": true },
+  "tmux": { "layout": "even-horizontal" }
 }
 ```
+
+`tmux.layout` controls how sub-agent panes are arranged (tmux re-applies it after every spawn/exit, so panes stay balanced). Valid values — same names as tmux's own layouts (`Ctrl+b` `Alt+1..5`):
+
+| Layout | Arrangement |
+| --- | --- |
+| `even-horizontal` | equal columns (default) |
+| `even-vertical` | equal rows |
+| `main-horizontal` | large pane on top, rest stacked below |
+| `main-vertical` | large pane on the left, rest in a column |
+| `tiled` | compact grid |
+
+Invalid config fails fast at startup: unknown keys and bad values are rejected with the offending file path and the list of valid values.
 
 ## Requirements
 
