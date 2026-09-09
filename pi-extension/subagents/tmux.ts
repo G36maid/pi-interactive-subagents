@@ -16,6 +16,11 @@ import { existsSync, readFileSync, rmSync, writeFileSync, mkdirSync } from "node
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
+import {
+  defaultSubagentsConfigPath,
+  readSubagentsConfig,
+} from "./config.ts";
+
 const execFileAsync = promisify(execFile);
 
 // ── Availability ──
@@ -70,11 +75,116 @@ export function shellEscape(s: string): string {
 // ── Pane layout ──
 
 /**
- * tmux layout applied to the subagent window to keep panes evenly sized.
- * Switchable: "even-horizontal" (equal columns, matches Ctrl+b Alt+1),
- * "main-vertical" (big main pane + tiled column), "tiled" (grid).
+ * tmux layouts accepted by `tmux.layout` in subagents.json. Same names tmux's
+ * own select-layout uses (Ctrl+b Alt+1..5):
+ *   even-horizontal  equal columns
+ *   even-vertical    equal rows
+ *   main-horizontal  large pane on top, rest stacked below
+ *   main-vertical    large pane on the left, rest in a column
+ *   tiled            compact grid
  */
-const SUBAGENT_TMUX_LAYOUT = "even-horizontal";
+export const TMUX_LAYOUTS = [
+  "even-horizontal",
+  "even-vertical",
+  "main-horizontal",
+  "main-vertical",
+  "tiled",
+] as const;
+
+export type TmuxLayout = (typeof TMUX_LAYOUTS)[number];
+
+export const DEFAULT_TMUX_LAYOUT: TmuxLayout = "even-horizontal";
+
+export interface TmuxConfig {
+  layout: TmuxLayout;
+}
+
+/**
+ * Currently active layout. Defaults to even-horizontal and is overridden at
+ * extension load from the subagents config file (see loadTmuxConfig /
+ * setSubagentTmuxLayout).
+ */
+let subagentTmuxLayout: TmuxLayout = DEFAULT_TMUX_LAYOUT;
+
+export function setSubagentTmuxLayout(layout: TmuxLayout): void {
+  subagentTmuxLayout = layout;
+}
+
+export function getSubagentTmuxLayout(): TmuxLayout {
+  return subagentTmuxLayout;
+}
+
+function invalidTmuxConfig(source: string, message: string): never {
+  throw new Error(`Invalid tmux config in ${source}: ${message}`);
+}
+
+function requireConfigObject(
+  value: unknown,
+  source: string,
+  fieldName: string,
+): Record<string, unknown> {
+  if (value == null || typeof value !== "object" || Array.isArray(value)) {
+    invalidTmuxConfig(source, `${fieldName} must be an object`);
+  }
+  return value as Record<string, unknown>;
+}
+
+function rejectUnsupportedConfigKeys(
+  value: Record<string, unknown>,
+  allowedKeys: string[],
+  source: string,
+  fieldName: string,
+): void {
+  const unsupportedKeys = Object.keys(value).filter((key) => !allowedKeys.includes(key));
+  if (unsupportedKeys.length > 0) {
+    invalidTmuxConfig(source, `${fieldName} has unsupported key(s): ${unsupportedKeys.join(", ")}`);
+  }
+}
+
+/**
+ * Validate the `tmux` section of subagents.json. The whole section is optional
+ * (missing section → default layout); when present, `layout` is required and
+ * must be one of TMUX_LAYOUTS. Unknown keys are rejected so typos fail fast.
+ */
+export function parseTmuxConfig(rawConfig: unknown, source = "subagents.json"): TmuxConfig {
+  const config = requireConfigObject(rawConfig, source, "root");
+  if (config.tmux === undefined) {
+    return { layout: DEFAULT_TMUX_LAYOUT };
+  }
+  const tmux = requireConfigObject(config.tmux, source, "tmux");
+  rejectUnsupportedConfigKeys(tmux, ["layout"], source, "tmux");
+
+  const rawLayout: unknown = tmux.layout;
+  if (rawLayout === undefined) {
+    invalidTmuxConfig(
+      source,
+      `tmux.layout is required when the tmux section is present. Valid layouts: ${TMUX_LAYOUTS.join(", ")}`,
+    );
+  }
+  if (typeof rawLayout !== "string") {
+    invalidTmuxConfig(source, `tmux.layout must be a string. Valid layouts: ${TMUX_LAYOUTS.join(", ")}`);
+  }
+  if (!TMUX_LAYOUTS.includes(rawLayout as TmuxLayout)) {
+    invalidTmuxConfig(
+      source,
+      `tmux.layout "${rawLayout}" is not supported. Valid layouts: ${TMUX_LAYOUTS.join(", ")}`,
+    );
+  }
+  return { layout: rawLayout as TmuxLayout };
+}
+
+/**
+ * Read the tmux section from the pi-standard config file
+ * (~/.pi/agent/extensions/subagents.json, see config.ts). A missing file or a
+ * file without a tmux section yields the default layout — the section is
+ * optional, so absence is not an error. Malformed JSON or an invalid tmux
+ * section throws.
+ */
+export function loadTmuxConfig(configPath = defaultSubagentsConfigPath()): TmuxConfig {
+  const rawConfig = readSubagentsConfig(configPath);
+  if (!rawConfig) return { layout: DEFAULT_TMUX_LAYOUT };
+  return parseTmuxConfig(rawConfig.parsed, rawConfig.sourcePath);
+}
 
 let rebalanceTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -82,8 +192,9 @@ let rebalanceTimer: ReturnType<typeof setTimeout> | null = null;
  * Re-balance subagent panes so repeated splits don't leave them lopsided.
  * tmux halves the target pane on every split and dumps freed space onto a
  * neighbor on close, so without this panes drift to wildly uneven widths.
- * Applies SUBAGENT_TMUX_LAYOUT to the parent pi window. Debounced so a burst
- * of parallel spawns or staggered exits collapses into a single layout call,
+ * Applies the configured layout (subagentTmuxLayout) to the parent pi window.
+ * Debounced so a burst of parallel spawns or staggered exits collapses into a
+ * single layout call,
  * and non-fatal: a cosmetic resize must never break spawning or watching.
  */
 function rebalanceSurfaces(hintPane?: string): void {
@@ -95,7 +206,7 @@ function rebalanceSurfaces(hintPane?: string): void {
     rebalanceTimer = null;
     try {
       // -t <pane> resolves to that pane's window; does not change focus.
-      execFileSync("tmux", ["select-layout", "-t", target, SUBAGENT_TMUX_LAYOUT], {
+      execFileSync("tmux", ["select-layout", "-t", target, subagentTmuxLayout], {
         encoding: "utf8",
       });
     } catch {

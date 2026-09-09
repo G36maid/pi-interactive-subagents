@@ -30,7 +30,16 @@ import {
   summarizeSessionStats,
 } from "../pi-extension/subagents/session.ts";
 
-import { shellEscape } from "../pi-extension/subagents/tmux.ts";
+import { defaultSubagentsConfigPath } from "../pi-extension/subagents/config.ts";
+import {
+  shellEscape,
+  DEFAULT_TMUX_LAYOUT,
+  TMUX_LAYOUTS,
+  getSubagentTmuxLayout,
+  loadTmuxConfig,
+  parseTmuxConfig,
+  setSubagentTmuxLayout,
+} from "../pi-extension/subagents/tmux.ts";
 import {
   advanceStatusState,
   capStatusLines,
@@ -689,8 +698,15 @@ describe("status.ts", () => {
     });
   });
 
+  it("defaults when the status section is absent", () => {
+    assert.deepEqual(parseStatusConfig({}), {
+      enabled: true,
+      lineLimit: 4,
+    });
+  });
+
   it("loads a valid config file", () => {
-    const examplePath = fileURLToPath(new URL("../config.json.example", import.meta.url));
+    const examplePath = fileURLToPath(new URL("../subagents.json.example", import.meta.url));
     const config = loadStatusConfig(examplePath);
 
     assert.deepEqual(config, {
@@ -699,17 +715,9 @@ describe("status.ts", () => {
     });
   });
 
-  it("loads the shared example when local config is absent", () => {
+  it("returns defaults when the config file is absent", () => {
     withTempDir((dir) => {
-      const examplePath = join(dir, "config.json.example");
-      writeFileSync(
-        examplePath,
-        JSON.stringify({ status: { enabled: true } }, null, 2) + "\n",
-      );
-
-      const config = loadStatusConfig(join(dir, "config.json"), examplePath);
-
-      assert.deepEqual(config, {
+      assert.deepEqual(loadStatusConfig(join(dir, "missing.json")), {
         enabled: true,
         lineLimit: 4,
       });
@@ -727,40 +735,14 @@ describe("status.ts", () => {
     );
   });
 
-  it("reports when neither local nor shared config exists", () => {
+  it("reports invalid JSON from the config file", () => {
     withTempDir((dir) => {
-      assert.throws(
-        () => loadStatusConfig(join(dir, "config.json"), join(dir, "config.json.example")),
-        /Missing subagent status config\. Expected .*config\.json.*or.*config\.json\.example/,
-      );
-    });
-  });
-
-  it("reports invalid JSON from the shared example path", () => {
-    withTempDir((dir) => {
-      const examplePath = join(dir, "config.json.example");
-      writeFileSync(examplePath, "{\n");
-
-      assert.throws(
-        () => loadStatusConfig(join(dir, "config.json"), examplePath),
-        /Invalid JSON in subagent config .*config\.json\.example/,
-      );
-    });
-  });
-
-  it("fails on invalid local config instead of falling back to the shared example", () => {
-    withTempDir((dir) => {
-      const configPath = join(dir, "config.json");
-      const examplePath = join(dir, "config.json.example");
+      const configPath = join(dir, "subagents.json");
       writeFileSync(configPath, "{\n");
-      writeFileSync(
-        examplePath,
-        JSON.stringify({ status: { enabled: true } }, null, 2) + "\n",
-      );
 
       assert.throws(
-        () => loadStatusConfig(configPath, examplePath),
-        /Invalid JSON in subagent config .*config\.json/,
+        () => loadStatusConfig(configPath),
+        /Invalid JSON in subagent config .*subagents\.json/,
       );
     });
   });
@@ -1062,6 +1044,109 @@ describe("status.ts", () => {
     assert.match(aggregate, /^Subagent status:/);
     assert.match(aggregate, /\+2 more running\./);
     assert.doesNotMatch(aggregate, /\/tmp|\.jsonl/);
+  });
+});
+
+describe("tmux layout config", () => {
+  it("defaults to even-horizontal when the tmux section is absent", () => {
+    assert.deepEqual(parseTmuxConfig({ status: { enabled: true } }), {
+      layout: DEFAULT_TMUX_LAYOUT,
+    });
+  });
+
+  it("accepts every supported layout", () => {
+    for (const layout of TMUX_LAYOUTS) {
+      assert.deepEqual(parseTmuxConfig({ tmux: { layout } }), { layout });
+    }
+  });
+
+  it("fails fast for invalid layout values", () => {
+    assert.throws(
+      () => parseTmuxConfig({ tmux: { layout: "diagonal" } }),
+      /tmux\.layout "diagonal" is not supported\. Valid layouts: even-horizontal, even-vertical, main-horizontal, main-vertical, tiled/,
+    );
+  });
+
+  it("requires layout when the tmux section is present", () => {
+    assert.throws(
+      () => parseTmuxConfig({ tmux: {} }),
+      /tmux\.layout is required when the tmux section is present/,
+    );
+  });
+
+  it("rejects non-string and non-object shapes", () => {
+    assert.throws(() => parseTmuxConfig({ tmux: { layout: 5 } }), /tmux\.layout must be a string/);
+    assert.throws(() => parseTmuxConfig({ tmux: "tiled" }), /tmux must be an object/);
+    assert.throws(
+      () => parseTmuxConfig({ tmux: { layout: "tiled", direction: "right" } }),
+      /tmux has unsupported key\(s\): direction/,
+    );
+  });
+
+  it("loads the layout from the example template", () => {
+    const examplePath = fileURLToPath(new URL("../subagents.json.example", import.meta.url));
+    assert.deepEqual(loadTmuxConfig(examplePath), { layout: "even-horizontal" });
+  });
+
+  it("returns defaults when the config file is absent", () => {
+    withTempDir((dir) => {
+      assert.deepEqual(loadTmuxConfig(join(dir, "missing.json")), {
+        layout: DEFAULT_TMUX_LAYOUT,
+      });
+    });
+  });
+
+  it("reports invalid JSON from the config file", () => {
+    withTempDir((dir) => {
+      const configPath = join(dir, "subagents.json");
+      writeFileSync(configPath, "{\n");
+
+      assert.throws(
+        () => loadTmuxConfig(configPath),
+        /Invalid JSON in subagent config .*subagents\.json/,
+      );
+    });
+  });
+
+  it("applies the configured layout via setter/getter", () => {
+    const previous = getSubagentTmuxLayout();
+    try {
+      setSubagentTmuxLayout("tiled");
+      assert.equal(getSubagentTmuxLayout(), "tiled");
+    } finally {
+      setSubagentTmuxLayout(previous);
+    }
+  });
+});
+
+describe("subagents config location", () => {
+  it("resolves the default path to pi's global extensions dir", () => {
+    assert.ok(defaultSubagentsConfigPath().endsWith(join("extensions", "subagents.json")));
+  });
+
+  it("reads the config from PI_CODING_AGENT_DIR when set", () => {
+    withTempDir((dir) => {
+      const extensionsDir = join(dir, "extensions");
+      mkdirSync(extensionsDir, { recursive: true });
+      writeFileSync(
+        join(extensionsDir, "subagents.json"),
+        JSON.stringify(
+          { status: { enabled: false }, tmux: { layout: "tiled" } },
+          null,
+          2,
+        ) + "\n",
+      );
+
+      const previous = process.env.PI_CODING_AGENT_DIR;
+      process.env.PI_CODING_AGENT_DIR = dir;
+      try {
+        assert.deepEqual(loadStatusConfig(), { enabled: false, lineLimit: 4 });
+        assert.deepEqual(loadTmuxConfig(), { layout: "tiled" });
+      } finally {
+        if (previous === undefined) delete process.env.PI_CODING_AGENT_DIR;
+        else process.env.PI_CODING_AGENT_DIR = previous;
+      }
+    });
   });
 });
 

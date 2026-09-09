@@ -24,6 +24,8 @@ import {
   closeSurface,
   shellEscape,
   readScreen,
+  loadTmuxConfig,
+  setSubagentTmuxLayout,
 } from "./tmux.ts";
 
 import {
@@ -526,6 +528,7 @@ function getArtifactDir(sessionDir: string, sessionId: string): string {
 }
 
 const statusConfig = loadStatusConfig();
+setSubagentTmuxLayout(loadTmuxConfig().layout);
 
 function formatWidgetRightLabel(snapshot: StatusSnapshot): string {
   if (snapshot.kind === "starting") return " starting… ";
