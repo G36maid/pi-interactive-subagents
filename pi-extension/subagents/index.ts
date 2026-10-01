@@ -166,6 +166,16 @@ const SPAWNING_TOOLS = [
 /** Built-in tools pi provides natively — no extension needs to be loaded. */
 const BUILTIN_TOOLS = new Set(["read", "write", "edit", "bash", "grep", "find", "ls"]);
 
+/**
+ * Tool names that pull in pi's native MCP stack (pi ≥ 0.99). `--no-extensions`
+ * disables built-in *extensions* too, so when an allowlist mentions one of
+ * these, the spawn re-enables the MCP stack explicitly via
+ * `-e builtin:mcp -e builtin:codemode -e builtin:tool-search`
+ * (see applySandboxToParts). `mcp` is kept as a legacy alias from the
+ * pi-mcp-adapter era; agent definitions should prefer codemode / tool_search.
+ */
+const NATIVE_MCP_TOOLS = new Set(["mcp", "codemode", "tool_search"]);
+
 /** Resolve the global agent config directory, respecting PI_CODING_AGENT_DIR. */
 function getAgentConfigDir(): string {
   return process.env.PI_CODING_AGENT_DIR ?? join(homedir(), ".pi", "agent");
@@ -209,7 +219,9 @@ export function registerToolExtension(name: string, extensionPath: string): void
  * Map a custom (non-built-in) tool name to the pi-extension file that
  * registers it. Used to build the child's `--extension` whitelist after
  * `--no-extensions` disables global discovery. Returns undefined for built-in
- * tools and for unknown names (which simply won't be granted).
+ * tools and for unknown names (which simply won't be granted). The native
+ * MCP tool names (mcp / codemode / tool_search) are intercepted earlier in
+ * applySandboxToParts and become `-e builtin:…` sources instead.
  */
 function getToolExtensionPath(tool: string): string | undefined {
   if (BUILTIN_TOOLS.has(tool)) return undefined;
@@ -834,6 +846,8 @@ function buildSubagentToolAllowlist(
  * resume path so the two can never drift. Env vars (PI_SUBAGENT_AGENT /
  * PI_SUBAGENT_ALLOWED / PI_CODING_AGENT_DIR) and cwd are the caller's
  * responsibility since they differ slightly between launch and resume.
+ * Allowlisted mcp / codemode / tool_search names become the native
+ * `-e builtin:…` MCP stack instead of file-backed extensions.
  */
 function applySandboxToParts(
   parts: string[],
@@ -868,9 +882,23 @@ function applySandboxToParts(
     parts.push("--tools", shellEscape(loadout.toolAllowlist));
 
     const extPaths = new Set<string>();
+    let wantsMcp = false;
     for (const tool of loadout.toolAllowlist.split(",")) {
+      if (NATIVE_MCP_TOOLS.has(tool)) {
+        wantsMcp = true;
+        continue;
+      }
       const extPath = getToolExtensionPath(tool);
       if (extPath && existsSync(extPath)) extPaths.add(extPath);
+    }
+    if (wantsMcp) {
+      // Native MCP stack (pi ≥ 0.99): builtin extensions are off under
+      // --no-extensions, so reload them explicitly. The MCP extension
+      // auto-activates codemode/tool_search as its servers need them, but
+      // loading all three makes the whitelisted tools exist immediately.
+      parts.push("-e", shellEscape("builtin:mcp"));
+      parts.push("-e", shellEscape("builtin:codemode"));
+      parts.push("-e", shellEscape("builtin:tool-search"));
     }
     for (const extPath of extPaths) {
       parts.push("-e", shellEscape(extPath));
