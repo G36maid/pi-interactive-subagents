@@ -136,6 +136,8 @@ Spawns must name a known agent at **every** depth. A top-level session may spawn
 
 Extensions can register additional tools for sub-agents at runtime via `registerToolExtension(name, path)` on the `__pi_interactive_subagents` process global.
 
+Native MCP (pi ≥ 0.99): allowlisting `codemode`, `tool_search`, or the legacy `mcp` alias makes the spawn load the built-in MCP stack explicitly (`-e builtin:mcp -e builtin:codemode -e builtin:tool-search`), since `--no-extensions` disables built-in extensions as well. The servers themselves still come from the usual `mcp.json`.
+
 ## Role folders
 
 `cwd` starts a sub-agent in a directory with its own config, so role-specific setups (CLAUDE.md, skills, extensions) apply:
